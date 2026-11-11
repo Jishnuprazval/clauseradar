@@ -51,6 +51,15 @@ export async function uploadPdfContract(req: AuthRequest, res: Response) {
     // Run optional Gemini AI plain-language enhancement
     const aiEnhancement = await enhanceAnalysisWithGemini(resolvedType, extractedText, detectedClauses);
 
+    let finalSummary = scoreResult.summary;
+    if (aiEnhancement?.executiveSummary) {
+      if (scoreResult.riskScore >= 50) {
+        finalSummary = `${scoreResult.summary} (AI Note: ${aiEnhancement.executiveSummary})`;
+      } else {
+        finalSummary = aiEnhancement.executiveSummary;
+      }
+    }
+
     // Save analysis record
     const analysis = await db.createAnalysis({
       userId,
@@ -62,7 +71,7 @@ export async function uploadPdfContract(req: AuthRequest, res: Response) {
       totalIssues: scoreResult.totalIssues,
       severityBreakdown: scoreResult.severityBreakdown,
       detectedClauses,
-      analysisSummary: aiEnhancement?.executiveSummary || scoreResult.summary,
+      analysisSummary: finalSummary,
       aiEnhancement: aiEnhancement || undefined,
     });
 
@@ -110,6 +119,15 @@ export async function analyzeTextContract(req: AuthRequest, res: Response) {
     // Run optional Gemini plain language enhancement
     const aiEnhancement = await enhanceAnalysisWithGemini(resolvedType, contractText, detectedClauses);
 
+    let finalSummary = scoreResult.summary;
+    if (aiEnhancement?.executiveSummary) {
+      if (scoreResult.riskScore >= 50) {
+        finalSummary = `${scoreResult.summary} (AI Note: ${aiEnhancement.executiveSummary})`;
+      } else {
+        finalSummary = aiEnhancement.executiveSummary;
+      }
+    }
+
     // Save analysis
     const analysis = await db.createAnalysis({
       userId,
@@ -121,7 +139,7 @@ export async function analyzeTextContract(req: AuthRequest, res: Response) {
       totalIssues: scoreResult.totalIssues,
       severityBreakdown: scoreResult.severityBreakdown,
       detectedClauses,
-      analysisSummary: aiEnhancement?.executiveSummary || scoreResult.summary,
+      analysisSummary: finalSummary,
       aiEnhancement: aiEnhancement || undefined,
     });
 

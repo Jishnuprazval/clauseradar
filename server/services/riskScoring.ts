@@ -17,13 +17,6 @@ export interface RiskScoreResult {
   summary: string;
 }
 
-const SEVERITY_WEIGHTS: Record<RiskSeverity, number> = {
-  Critical: 10,
-  High: 8,
-  Medium: 5,
-  Low: 2,
-};
-
 export function calculateRiskScore(detectedClauses: DetectedClause[]): RiskScoreResult {
   const breakdown: SeverityBreakdown = {
     critical: 0,
@@ -32,29 +25,59 @@ export function calculateRiskScore(detectedClauses: DetectedClause[]): RiskScore
     low: 0,
   };
 
-  let totalPoints = 0;
-
   for (const clause of detectedClauses) {
     const sev = clause.severity;
-    totalPoints += SEVERITY_WEIGHTS[sev] || 0;
     if (sev === 'Critical') breakdown.critical++;
     else if (sev === 'High') breakdown.high++;
     else if (sev === 'Medium') breakdown.medium++;
     else if (sev === 'Low') breakdown.low++;
   }
 
-  // Maximum possible points = 10 rules evaluated * maximum rule weight (10) = 100 points
-  const maxPossiblePoints = CONTRACT_RULES.length * 10;
-  let rawScore = Math.round((totalPoints / maxPossiblePoints) * 100);
+  let calculatedScore = 0;
 
-  // If critical clauses exist (like Service Bond or Salary Deductions), ensure minimum elevated score
-  if (breakdown.critical >= 2 && rawScore < 55) {
-    rawScore = 55;
-  } else if (breakdown.critical >= 1 && rawScore < 35) {
-    rawScore = 35;
+  if (detectedClauses.length === 0) {
+    calculatedScore = 5; // Clean baseline
+  } else {
+    // Weighted scoring reflecting real-world contract liability:
+    // Critical issues (Service bonds, wage forfeiture) must immediately trigger Very High / High Risk!
+    // High issues (Non-competes, 90-day notice, IP transfer) must trigger High Risk!
+    let points = 0;
+
+    // Critical: 40 points each (floor of 75 if at least 1 critical)
+    points += breakdown.critical * 35;
+    // High: 20 points each (floor of 52 if at least 1 high)
+    points += breakdown.high * 20;
+    // Medium: 10 points each
+    points += breakdown.medium * 10;
+    // Low: 5 points each
+    points += breakdown.low * 5;
+
+    // Enforce realistic safety floors:
+    // 1 Critical clause alone is a severe red flag (Score: 78 - 95, Very High Risk)
+    if (breakdown.critical >= 2) {
+      points = Math.max(points, 88);
+    } else if (breakdown.critical === 1) {
+      points = Math.max(points, 78);
+    } else if (breakdown.high >= 2) {
+      // 2 High issues -> Very High Risk (75+)
+      points = Math.max(points, 75);
+    } else if (breakdown.high === 1) {
+      // 1 High issue -> High Risk (55 - 65)
+      points = Math.max(points, 56);
+    } else if (breakdown.medium >= 2) {
+      // 2 Medium issues -> Moderate/High Risk (45 - 52)
+      points = Math.max(points, 45);
+    } else if (breakdown.medium === 1) {
+      // 1 Medium issue -> Moderate Risk (32)
+      points = Math.max(points, 32);
+    } else if (breakdown.low > 0) {
+      points = Math.max(points, 18);
+    }
+
+    calculatedScore = points;
   }
 
-  const riskScore = Math.min(100, Math.max(0, rawScore));
+  const riskScore = Math.min(100, Math.max(0, Math.round(calculatedScore)));
 
   let riskLevel: RiskLevel = 'Low Risk';
   if (riskScore >= 75) {
@@ -71,15 +94,18 @@ export function calculateRiskScore(detectedClauses: DetectedClause[]): RiskScore
   let summary = '';
   if (detectedClauses.length === 0) {
     summary =
-      'No common high-risk red flag clauses were detected by the automated rule screening engine. However, always review terms thoroughly or consult a legal advisor before signing.';
-  } else if (riskScore >= 75) {
-    summary = `Critical risk detected. This contract contains ${breakdown.critical} critical and ${breakdown.high} high-severity clauses (including potential service bonds, penalty fees, or wage deductions). Signing without substantive negotiation is strongly discouraged.`;
-  } else if (riskScore >= 50) {
-    summary = `High risk detected across ${detectedClauses.length} distinct clauses. Important areas of concern include ${breakdown.critical > 0 ? 'liquidated penalties, ' : ''}restrictive non-compete clauses, or unbalanced termination policies.`;
-  } else if (riskScore >= 25) {
-    summary = `Moderate risk identified. Found ${detectedClauses.length} clauses that warrant clarification or negotiation, notably around notice periods, unilateral modification, or data sharing.`;
+      'No explicit red flag clauses were detected by the automated rule screening engine. However, review all obligations and consider having a legal mentor inspect the agreement before signing.';
+  } else if (breakdown.critical > 0 || riskScore >= 75) {
+    const items = [];
+    if (breakdown.critical > 0) items.push(`${breakdown.critical} critical penalty/bond clause(s)`);
+    if (breakdown.high > 0) items.push(`${breakdown.high} high-severity restriction(s)`);
+    summary = `CRITICAL RISK DETECTED: This agreement contains ${items.join(' and ')}. Terms such as mandatory service bonds, liquidated exit damages, or wage deductions create substantial personal financial liability. Do NOT sign without seeking removal or formal renegotiation of these terms.`;
+  } else if (breakdown.high > 0 || riskScore >= 50) {
+    summary = `HIGH RISK DETECTED: Found ${detectedClauses.length} significant concern(s), notably around non-compete restraints, excessive notice periods, or unilateral term modifications. These clauses significantly restrict your professional rights and require negotiation before signing.`;
+  } else if (breakdown.medium > 0 || riskScore >= 25) {
+    summary = `MODERATE RISK IDENTIFIED: Found ${detectedClauses.length} clause(s) that warrant clarification, such as automatic renewals, data collection, or broad indemnification provisions. Discuss these terms with the drafting party to secure balanced protections.`;
   } else {
-    summary = `Low overall risk score. Minor potential issues detected (${detectedClauses.length} clause(s)), which can likely be clarified through informal dialogue with the drafting party.`;
+    summary = `LOW RISK DETECTED: Found ${detectedClauses.length} minor contractual item(s). These appear to be low-severity standard provisions that can be addressed via routine conversation with the other party.`;
   }
 
   return {
